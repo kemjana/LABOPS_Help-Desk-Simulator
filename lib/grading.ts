@@ -34,7 +34,7 @@ export async function gradeWithGemini(ticket: Row, criteria: CritIn[], text: { r
   const submission = `Root cause: ${text.root}\nSteps taken: ${text.steps}\nLab evidence: ${text.proof}`;
   const ids = criteria.map((c) => c.id);
   const raw = await geminiJson<{ id: string; met: boolean; quote: string }[]>({
-    system: SYSTEM, schema: SCHEMA, maxTokens: 900,
+    system: SYSTEM, schema: SCHEMA, maxTokens: 900, timeoutMs: 22000,
     prompt: `Ticket subject: ${ticket.subject}\nTicket description: ${ticket.description}\n\nChecklist:\n${criteria.map((c) => `- ${c.id}: ${c.text}`).join('\n')}\n\n<<<SUBMISSION\n${submission}\nSUBMISSION>>>`,
     validate: (x) => {
       const arr = (x as Row)?.results;

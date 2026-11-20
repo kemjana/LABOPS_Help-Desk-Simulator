@@ -46,7 +46,9 @@ export default function Dashboard() {
     try {
       setProgress((p) => ({ ...p, running: true }));
       for (let i = 0; i < 6; i++) {
-        const r = await api<{ created: number; open: number; target: number; done: boolean }>('/api/board/refill', { method: 'POST', body: {} });
+        let r: { created: number; open: number; target: number; done: boolean };
+        try { r = await api('/api/board/refill', { method: 'POST', body: {} }); }
+        catch { r = await api('/api/board/refill', { method: 'POST', body: { fast: true } }); } // slow AI or server? retry once with simple wording (no AI)
         setProgress({ running: !r.done && r.created > 0, open: r.open, target: r.target });
         await loadState();
         if (r.done || r.created === 0) break;

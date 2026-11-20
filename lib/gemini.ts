@@ -39,7 +39,8 @@ function thinkingOptions(model: string): Thinking[] {
 const workingOption = new Map<string, number>();
 const isThinkingSettingError = (msg: string) => /think/i.test(msg) && /(400|INVALID_ARGUMENT|not supported|unsupported|invalid)/i.test(msg);
 
-interface GenArgs { model: string; contents: string; system?: string; maxTokens: number; temperature: number; json?: { schema: object } }
+interface GenArgs { model: string; contents: string; system?: string; maxTokens: number; temperature: number; json?: { schema: object }; timeoutMs?: number }
+const DEFAULT_TIMEOUT_MS = 25000;
 async function generate(ai: GoogleGenAI, a: GenArgs) {
   const opts = thinkingOptions(a.model);
   for (let i = workingOption.get(a.model) ?? 0; i < opts.length; i++) {
@@ -50,6 +51,8 @@ async function generate(ai: GoogleGenAI, a: GenArgs) {
       const r = await ai.models.generateContent({
         model: a.model, contents: a.contents,
         config: {
+          // hard time limit and NO hidden retries (the SDK retries up to 5 times by default, which can exceed Vercel's time limit)
+          httpOptions: { timeout: a.timeoutMs ?? DEFAULT_TIMEOUT_MS, retryOptions: { attempts: 1 } }, abortSignal: AbortSignal.timeout(a.timeoutMs ?? DEFAULT_TIMEOUT_MS),
           ...(a.system ? { systemInstruction: a.system } : {}), maxOutputTokens, temperature: a.temperature,
           ...(a.json ? { responseMimeType: 'application/json', responseJsonSchema: a.json.schema } : {}),
           ...(tc ? { thinkingConfig: tc } : {}),
@@ -68,6 +71,7 @@ async function generate(ai: GoogleGenAI, a: GenArgs) {
 
 function classify(e: unknown): GeminiError {
   const msg = e instanceof Error ? e.message : String(e);
+  if (/abort|timeout|timed out|deadline|ETIMEDOUT|ECONNRESET/i.test(msg) && !/think/i.test(msg)) return new GeminiError('network', 'The AI took too long to answer. Please retry.', msg);
   if (isThinkingSettingError(msg)) return new GeminiError('model', 'This AI model rejected a setting. Try another GEMINI_MODEL (see /setup-check).', msg);
   if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) return new GeminiError('quota', 'The AI is busy or over its free limit. Wait a minute and retry.', msg);
   if (/404|NOT_FOUND|not found|not supported|deprecated|no longer/i.test(msg)) return new GeminiError('model', 'The AI model name is not available. Check GEMINI_MODEL on /setup-check.', msg);
@@ -75,15 +79,16 @@ function classify(e: unknown): GeminiError {
   return new GeminiError('network', 'The AI did not answer. Please retry.', msg);
 }
 
-interface JsonOpts<T> { system: string; prompt: string; schema: object; maxTokens: number; validate: (x: unknown) => T }
+interface JsonOpts<T> { system: string; prompt: string; schema: object; maxTokens: number; validate: (x: unknown) => T; timeoutMs?: number; tries?: number; useFallback?: boolean }
 
 export async function geminiJson<T>(o: JsonOpts<T>): Promise<T> {
   const ai = client();
   let last: GeminiError | null = null;
-  for (const model of models()) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+  const list = o.useFallback === false ? models().slice(0, 1) : models();
+  for (const model of list) {
+    for (let attempt = 0; attempt < (o.tries ?? 2); attempt++) {
       try {
-        const r = await generate(ai, { model, contents: o.prompt, system: o.system, maxTokens: o.maxTokens, temperature: 0.4, json: { schema: o.schema } });
+        const r = await generate(ai, { model, contents: o.prompt, system: o.system, maxTokens: o.maxTokens, temperature: 0.4, json: { schema: o.schema }, timeoutMs: o.timeoutMs });
         const text = (r.text || '').replace(/^```json\s*|```$/g, '').trim();
         return o.validate(JSON.parse(text));
       } catch (e) {
@@ -100,12 +105,12 @@ export async function geminiJson<T>(o: JsonOpts<T>): Promise<T> {
   throw last ?? new GeminiError('network', 'The AI did not answer.');
 }
 
-export async function geminiText(o: { system: string; prompt: string; maxTokens: number }): Promise<string> {
+export async function geminiText(o: { system: string; prompt: string; maxTokens: number; timeoutMs?: number }): Promise<string> {
   const ai = client();
   let last: GeminiError | null = null;
   for (const model of models()) {
     try {
-      const r = await generate(ai, { model, contents: o.prompt, system: o.system, maxTokens: o.maxTokens, temperature: 0.5 });
+      const r = await generate(ai, { model, contents: o.prompt, system: o.system, maxTokens: o.maxTokens, temperature: 0.5, timeoutMs: o.timeoutMs });
       const t = (r.text || '').trim();
       if (!t) throw new GeminiError('invalid', 'The AI returned an empty answer.');
       return t;
@@ -124,7 +129,7 @@ export const bad = (m: string): never => { throw new ValidationError(m); };
 export async function pingModel(model: string): Promise<{ ok: boolean; message: string }> {
   try {
     const ai = client();
-    const r = await generate(ai, { model, contents: 'Reply with the single word OK.', maxTokens: 20, temperature: 0 });
+    const r = await generate(ai, { model, contents: 'Reply with the single word OK.', maxTokens: 20, temperature: 0, timeoutMs: 12000 });
     return { ok: true, message: (r.text || '(empty answer)').trim().slice(0, 40) };
   } catch (e) {
     return { ok: false, message: (e instanceof Error ? e.message : String(e)).slice(0, 300) };

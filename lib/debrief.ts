@@ -84,7 +84,7 @@ export async function writeNarrative(req: Request, userId: string, stats: Stats)
     weakest_topics: stats.weaknesses.map((w) => w.label), best_category: CATEGORIES.map((c) => ({ c, n: stats.per_category[c].resolved })).sort((a, b) => b.n - a.n)[0].n ? CATEGORY_LABEL[CATEGORIES.map((c) => ({ c, n: stats.per_category[c].resolved })).sort((a, b) => b.n - a.n)[0].c] : null, tomorrow_focus: stats.recommended.map((r) => r.title) };
   const allowed = new Set((JSON.stringify(input).match(/\d+(\.\d+)?/g) ?? []));
   return geminiJson<{ headline: string; summary: string; tip: string }>({
-    system: NARR_SYSTEM, schema: NARR_SCHEMA, maxTokens: 500, prompt: `Shift data (JSON):\n${JSON.stringify(input)}`,
+    system: NARR_SYSTEM, schema: NARR_SCHEMA, maxTokens: 500, timeoutMs: 15000, tries: 1, prompt: `Shift data (JSON):\n${JSON.stringify(input)}`,
     validate: (x) => {
       const o = x as Row; if (!o || ![o.headline, o.summary, o.tip].every((s) => typeof s === 'string')) return bad('shape');
       if (o.headline.length < 4 || o.headline.length > 100 || o.summary.length < 20 || o.summary.length > 520 || o.tip.length < 8 || o.tip.length > 260) return bad('length');

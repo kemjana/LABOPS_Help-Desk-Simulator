@@ -39,7 +39,7 @@ export const POST = route(async (req) => {
 Ticket ${t.ticket_code} [${t.category}, ${t.tier}] on ${t.affected_host}: ${t.subject}
 Description: ${t.description}
 Recent chat:\n${history || '(none)'}\nStudent: ${message}`;
-  const reply = await geminiText({ system, prompt, maxTokens: 500 });
+  const reply = await geminiText({ system, prompt, maxTokens: 500, timeoutMs: 20000 });
   await insert('ticket_messages', [
     { user_id: user.id, ticket_id: t.id, role: 'user', kind: 'chat', content: message },
     { user_id: user.id, ticket_id: t.id, role: 'assistant', kind: 'chat', content: reply.slice(0, 2000) },

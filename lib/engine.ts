@@ -92,13 +92,13 @@ export function validateVaried(x: unknown, facts: string[]): Varied {
 
 export async function varyText(req: Request, userId: string, bp: Blueprint, ctx: Ctx, host: string, scenario: string, allowGemini: boolean): Promise<Varied & { ai: boolean }> {
   const fallback = { subject: fallbackSubject(bp, ctx), description: scenario, ai: false };
-  if (!allowGemini || !hasGeminiKey()) return fallback;
+  if (!allowGemini || !hasGeminiKey() || (process.env.TICKET_WORDING_AI || '').toLowerCase() === 'off') return fallback;
   try {
     await limitGemini(req, userId);
     const facts = Array.from(new Set(scenario.match(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g) || []));
     if (!scenario.includes(host)) facts.push(host);
     const v = await geminiJson<Varied>({
-      system: VARY_SYSTEM, maxTokens: 500, schema: VARY_SCHEMA,
+      system: VARY_SYSTEM, maxTokens: 500, schema: VARY_SCHEMA, timeoutMs: 6000, tries: 1, useFallback: false, // wording is cosmetic: never let it slow the board down
       prompt: `Scenario (data):\n"""${scenario}"""\nRequester: ${ctx.name}, department ${ctx.dept}. Affected machine: ${host}.`,
       validate: (x) => validateVaried(x, facts),
     });
